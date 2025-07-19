@@ -1,0 +1,211 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include "MAX30100_PulseOximeter.h"
+
+#define BUTTON_PIN 4
+#define REPORTING_PERIOD_MS 1000
+#define AVERAGE_PERIOD_MS 20000
+#define IGNORE_PERIOD_MS 5000
+#define SAMPLE_INTERVAL_MS 10
+#define RESULT_DISPLAY_MS 5000
+
+#define BPM_MIN 50
+#define BPM_MAX 110
+#define SPO2_MIN 88
+#define SPO2_MAX 105
+
+const float MODEL_INTERCEPT = 36.485;
+const float MODEL_SLOPE = 0.3665;
+
+// LCD
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// MAX30100
+PulseOximeter pox;
+float BPM, SpO2;
+float sumBPM = 0, sumSpO2 = 0;
+int countBPM = 0, countSpO2 = 0;
+
+// TCRT Sensor
+uint32_t sumTCRT = 0;
+uint16_t countTCRT = 0;
+float avgTCRT = 0.0;
+
+// Timing
+uint32_t tsStart = 0;
+uint32_t tsLastSample = 0;
+uint32_t tsLastReport = 0;
+
+// State
+bool isRunning = false;
+
+void onBeatDetected() {
+  Serial.println("Beat Detected!");
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUTTON_PIN, INPUT);
+  analogReference(INTERNAL);
+  Wire.begin();
+
+  // LCD init
+  lcd.init();
+  lcd.backlight();
+  displayReadyMessage();
+
+  // MAX30100 init
+  Serial.print("Initializing pulse oximeter...");
+  if (!pox.begin()) {
+    Serial.println("FAILED");
+    while (1);
+  } else {
+    Serial.println("SUCCESS");
+    pox.setOnBeatDetectedCallback(onBeatDetected);
+  }
+  pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
+}
+
+void loop() {
+  pox.update();
+  BPM = pox.getHeartRate() - 100;
+  if (BPM == -100) BPM = 0;
+  SpO2 = pox.getSpO2();
+
+  if (digitalRead(BUTTON_PIN) == HIGH && !isRunning) {
+    startMeasurement();
+  }
+
+  if (!isRunning) return;
+
+  uint32_t currentTime = millis();
+  uint32_t elapsedTime = currentTime - tsStart;
+  uint32_t remainingTime = AVERAGE_PERIOD_MS - elapsedTime;
+
+  // Phase 1: Warm-up
+  if (elapsedTime < IGNORE_PERIOD_MS) {
+    static int lastCountdown = -1;
+    int countdown = (IGNORE_PERIOD_MS - elapsedTime) / 1000;
+    if (countdown != lastCountdown) {
+      displayCountdown(countdown);
+      lastCountdown = countdown;
+    }
+    return;
+  }
+
+  // Phase 2: Sampling
+  if (currentTime - tsLastSample >= SAMPLE_INTERVAL_MS) {
+    tsLastSample = currentTime;
+    int rawValue = analogRead(A0);
+    if (rawValue >= 0 && rawValue <= 1023) {
+      sumTCRT += rawValue;
+      countTCRT++;
+      Serial.print("TCRT: "); Serial.println(rawValue);
+    }
+
+    if (BPM >= BPM_MIN && BPM <= BPM_MAX) {
+      sumBPM += BPM;
+      countBPM++;
+    }
+
+    if (SpO2 >= SPO2_MIN && SpO2 <= SPO2_MAX) {
+      sumSpO2 += SpO2;
+      countSpO2++;
+    }
+  }
+
+  // Phase 3: Countdown Display
+  if (currentTime - tsLastReport >= REPORTING_PERIOD_MS) {
+    tsLastReport = currentTime;
+    displayCountdownToFinish(remainingTime / 1000);
+  }
+
+  // Phase 4: Done
+  if (elapsedTime >= AVERAGE_PERIOD_MS) {
+    finishMeasurement();
+  }
+}
+
+// --- LCD FUNCTIONS ---
+
+void displayReadyMessage() {
+  lcd.clear();
+  lcd.setCursor(0, 0); lcd.print("SYSTEM READY");
+  lcd.setCursor(0, 1); lcd.print("Press the button");
+}
+
+void displayCountdown(int seconds) {
+  lcd.clear();
+  lcd.setCursor(0, 0); lcd.print("Calibrating...");
+  lcd.setCursor(0, 1); lcd.print("Time left: ");
+  lcd.print(seconds); lcd.print("s");
+}
+
+void displayCountdownToFinish(int seconds) {
+  lcd.clear();
+  lcd.setCursor(0, 0); lcd.print("Measuring...");
+  lcd.setCursor(0, 1); lcd.print("Remaining: ");
+  lcd.print(seconds); lcd.print("s");
+}
+
+void displayGlucoseResult(float glucose) {
+  lcd.clear();
+  lcd.setCursor(0, 0); lcd.print("GLUCOSE LEVEL");
+  lcd.setCursor(0, 1); lcd.print("= ");
+  lcd.print(glucose, 1); lcd.print(" mg/dL");
+  delay(RESULT_DISPLAY_MS);
+}
+
+void displayBPMResult(float avgBPM) {
+  lcd.clear();
+  lcd.setCursor(0, 0); lcd.print("BPM IS:");
+  lcd.setCursor(0, 1); lcd.print("= ");
+  lcd.print(avgBPM, 1);
+  delay(RESULT_DISPLAY_MS);
+}
+
+void displaySpO2Result(float avgSpO2) {
+  lcd.clear();
+  lcd.setCursor(0, 0); lcd.print("SpO2 is:");
+  lcd.setCursor(0, 1); lcd.print("= ");
+  lcd.print(avgSpO2, 1); lcd.print(" %");
+  delay(RESULT_DISPLAY_MS);
+}
+
+// --- MEASUREMENT FUNCTIONS ---
+
+void startMeasurement() {
+  isRunning = true;
+  tsStart = millis();
+  tsLastSample = tsStart;
+  tsLastReport = tsStart;
+
+  sumTCRT = 0;
+  countTCRT = 0;
+  sumBPM = 0;
+  sumSpO2 = 0;
+  countBPM = 0;
+  countSpO2 = 0;
+
+  Serial.println("Measurement started...");
+}
+
+void finishMeasurement() {
+  avgTCRT = sumTCRT / (float)countTCRT;
+  float avgBPM = countBPM > 0 ? sumBPM / countBPM : 0;
+  float avgSpO2 = countSpO2 > 0 ? sumSpO2 / countSpO2 : 0;
+  float estimatedGlucose = MODEL_INTERCEPT + MODEL_SLOPE * avgTCRT;
+
+  Serial.println("\n=== FINAL RESULTS ===");
+  Serial.print("Avg TCRT: "); Serial.println(avgTCRT, 2);
+  Serial.print("Estimated Glucose: "); Serial.println(estimatedGlucose, 1);
+  Serial.print("Avg BPM: "); Serial.println(avgBPM, 1);
+  Serial.print("Avg SpO2: "); Serial.print(avgSpO2, 1); Serial.println(" %");
+
+  displayGlucoseResult(estimatedGlucose);
+  displayBPMResult(avgBPM);
+  displaySpO2Result(avgSpO2);
+
+  displayReadyMessage();
+  isRunning = false;
+}
