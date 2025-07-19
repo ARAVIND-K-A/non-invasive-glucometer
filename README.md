@@ -1,2 +1,30 @@
-# non-invasive-glucometer
-This project presents a low-cost, pain-free non-invasive glucometer using optical sensors and Arduino. It aims to estimate blood glucose levels without skin penetration by analyzing light reflectance from the fingertip using the TCRT1000 infrared sensor. The device is also integrated with the MAX30100 sensor for displaying BPM and SpO₂ levels.
+🩺 Non-Invasive Glucometer Using Optical Sensors and Arduino
+
+This repository contains the hardware schematics, Arduino code, and machine learning logic for a non-invasive blood glucose monitoring system developed using optical reflectance sensors (TCRT1000) and MAX30100 pulse oximeter. The project aims to provide a pain-free, cost-effective, and portable alternative to traditional blood glucose testing methods.
+📌 Features
+
+    🌟 Glucose estimation using skin reflectance (TCRT1000)
+
+    ❤️ Heart Rate & SpO₂ monitoring (MAX30100)
+
+    🧠 Polynomial regression model for glucose prediction
+
+    💡 Real-time display via I2C 16x2 LCD
+
+    🔘 Push-button interface to start measurements
+
+    ⚡ Signal conditioning circuit with LM358 op-amp
+
+    🔌 Arduino Nano-based control system
+
+🧰 Technologies Used
+
+    Arduino (C/C++)
+
+    Embedded Systems
+
+    Machine Learning (Polynomial Regression)
+
+    Signal Conditioning (Analog electronics)
+
+    Biomedical Sensor Integration
